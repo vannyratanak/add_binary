@@ -59,9 +59,22 @@ The program prints the execution time for both sequential and parallel binary ad
 
 ## 6. Analysis
 
-- Conducted experiments on the length index of variable `a = 5` (e.g., 11111) and `b = 5` (e.g., 10101). The first algorithm took more time than the other two algorithms.
-- Conducted experiments on the length index of variable `a = 64` (64 digits) and `b = 64` (64 digits). The execution times of the second parallel algorithm `par_add_binary` and the sequential algorithm are quite similar.
-- Conducted experiments on the length index of variable `a = 100_000` (100,000 digits) and `b = 100_000` (100,000 digits). The larger the data given, the execution time of the second parallel algorithm `par_add_binary` is faster compared to the sequential algorithm. However, the first algorithm `par_add_binary1` isn’t executable due to the given data being very large.
+- Conducted experiments on the length index of variable `a = 5` (e.g., 11111) and `b = 5` (e.g., 10101).
+  
+  ![alt text](https://github.com/vannyratanak/add_binary/blob/main/img/capture.png)
+  
+  The first algorithm took more time than the other two algorithms.
+- Conducted experiments on the length index of variable `a = 64` (64 digits) and `b = 64` (64 digits).
+  
+  ![alt text](https://github.com/vannyratanak/add_binary/blob/main/img/capture1.png)
+
+  The execution times of the second parallel algorithm `par_add_binary` and the sequential algorithm are quite similar.
+
+- Conducted experiments on the length index of variable `a = 100_000` (100,000 digits) and `b = 100_000` (100,000 digits).
+  
+  ![alt text](https://github.com/vannyratanak/add_binary/blob/main/img/capture2.png)
+
+   The larger the data given, the execution time of the second parallel algorithm `par_add_binary` is faster compared to the sequential algorithm. However, the first algorithm `par_add_binary1` isn’t executable due to the given data being very large.
 
 ## 7. Conclusion
 
