@@ -1,64 +1,73 @@
-use rayon::prelude::*;
 use rand::prelude::*;
+use rayon::prelude::*;
+use std::time::Instant;
 
 fn main() {
+    // Optional first argument: number of binary digits, e.g. `cargo run --release -- 100000`.
+    // Without it, a random length between 1 and 10 is used.
+    let len: usize = std::env::args()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| rand::thread_rng().gen_range(1..=10));
+
     // Generate random binary numbers
-    let len = rand::thread_rng().gen_range(1..=10);
     let binary_number1 = remove_leading_zeros(generate_random_binary(len));
     let binary_number2 = remove_leading_zeros(generate_random_binary(len));
 
-    // Print generated binary numbers
-    println!("Binary1: {}", binary_number1);
-    println!("Binary2: {}", binary_number2);
+    if len <= 64 {
+        println!("Binary1: {}", binary_number1);
+        println!("Binary2: {}", binary_number2);
+    } else {
+        println!("Binary1 and Binary2: {} digits each (not printed)", len);
+    }
 
-    // // Parallel sum 1
-    // // **** noted that this algorithmn work only length of binary below 64
-    let start = std::time::Instant::now();
-    let parallel_result = par_add_binary1(binary_number1.clone(), binary_number2.clone());
-    println!("\n0. Parallel sum: {}", parallel_result);
-    println!("Parallel 1 took {:?}", start.elapsed());
+    // Sequential sum (the reference answer)
+    let start = Instant::now();
+    let seq_result = add_binary(&binary_number1, &binary_number2);
+    let seq_time = start.elapsed();
 
-    // Parallel sum
-    let start = std::time::Instant::now();
-    let parallel_result = par_add_binary(binary_number1.clone(), binary_number2.clone());
-    println!("\n1. Parallel sum: {}", parallel_result);
-    println!("Parallel 2 took {:?}", start.elapsed());
+    // First parallel algorithm: only works below 64 digits (u64 overflow)
+    if binary_number1.len() < 64 && binary_number2.len() < 64 {
+        let start = Instant::now();
+        let parallel_result = par_add_binary1(&binary_number1, &binary_number2);
+        println!("\n0. Parallel sum 1 took {:?}", start.elapsed());
+        assert_eq!(parallel_result, seq_result, "par_add_binary1 gives a wrong sum");
+    } else {
+        println!("\n0. Parallel sum 1 skipped (needs fewer than 64 digits)");
+    }
 
-    // Sequential sum
-    let start = std::time::Instant::now();
-    let seq_result = add_binary(binary_number1.to_string(), binary_number2.to_string());
-    println!("\n2. Sequence sum: {}", seq_result);
-    println!("Sequence took {:?}", start.elapsed());
+    // Second parallel algorithm
+    let start = Instant::now();
+    let parallel_result = par_add_binary(&binary_number1, &binary_number2);
+    println!("1. Parallel sum 2 took {:?}", start.elapsed());
+    assert_eq!(parallel_result, seq_result, "par_add_binary gives a wrong sum");
+
+    println!("2. Sequential sum took {:?}", seq_time);
+    if len <= 64 {
+        println!("\nSum: {}", seq_result);
+    }
+    println!("All algorithms give the same sum.");
 }
 
-// Sequential sum binary
-fn add_binary(a: String, b: String) -> String {
-    let a = a.chars().rev().collect::<String>();
-    let b = b.chars().rev().collect::<String>();
-    let mut result = String::new();
-    let mut carry = 0;
+/// Sequential binary addition.
+/// Works on bytes: `as_bytes()[i]` is O(1), while `chars().nth(i)` walks the string and is O(i).
+fn add_binary(a: &str, b: &str) -> String {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
     let max_len = a.len().max(b.len());
+    let mut result = Vec::with_capacity(max_len + 1); // digits, least significant first
+    let mut carry = 0u8;
     for i in 0..max_len {
-        let digit_a = a.chars().nth(i).unwrap_or('0').to_digit(2).unwrap_or(0);
-        let digit_b = b.chars().nth(i).unwrap_or('0').to_digit(2).unwrap_or(0);
+        let digit_a = if i < a.len() { a[a.len() - 1 - i] - b'0' } else { 0 };
+        let digit_b = if i < b.len() { b[b.len() - 1 - i] - b'0' } else { 0 };
         let sum = digit_a + digit_b + carry;
-        result.push_str(&(sum % 2).to_string());
+        result.push(b'0' + sum % 2);
         carry = sum / 2;
-        // println!("Index {}, digit_a: {}, digit_b: {}, sum: {}, carry: {}", i, digit_a, digit_b, sum, carry);
     }
-
     if carry == 1 {
-        result.push('1');
+        result.push(b'1');
     }
-    
-    let result_str = result.chars().rev().skip_while(|&c| c == '0').collect::<String>();
-
-    // If the result is '0' and there's only one digit, return '0'
-    if result_str == "" || result_str.len() == 0 {
-        "0".to_string()
-    } else {
-        result_str
-    }
+    result.reverse();
+    remove_leading_zeros(String::from_utf8(result).unwrap())
 }
 
 fn generate_random_binary(length: usize) -> String {
@@ -78,95 +87,134 @@ fn remove_leading_zeros(binary_str: String) -> String {
 }
 
 // First algo of parallel sum binary
-fn par_add_binary1(a: String, b: String) -> String {
+// Limit: a u64 holds 64 bits, so each number needs fewer than 64 digits (the sum must fit too).
+fn par_add_binary1(a: &str, b: &str) -> String {
+    assert!(
+        a.len() < 64 && b.len() < 64,
+        "par_add_binary1 only works with fewer than 64 binary digits"
+    );
     // Convert binary strings to decimals in parallel
-    let sum_decimal: u64 = vec![a.clone(), b.clone()]
+    let sum_decimal: u64 = [a, b]
         .par_iter()
-        .map(|binary| binary_to_decimal(binary.to_string()))
+        .map(|binary| binary_to_decimal(binary))
         .sum();
 
     // Convert the sum decimal to binary
     decimal_to_binary(sum_decimal)
 }
 
-fn binary_to_decimal(binary: String) -> u64 {
-    u64::from_str_radix(&binary, 2).expect("Invalid binary number")
+fn binary_to_decimal(binary: &str) -> u64 {
+    u64::from_str_radix(binary, 2).expect("Invalid binary number")
 }
 
 fn decimal_to_binary(decimal: u64) -> String {
     format!("{:b}", decimal)
 }
 
-// Second algo of parallel sum binary
-fn par_add_binary(a: String, b: String) -> String {
-    let a = a.chars().rev().collect::<String>();
-    let b = b.chars().rev().collect::<String>();
+// Second algo of parallel sum binary (carry-select)
+//
+// The carry is the hard part: chunk k needs the carry coming out of chunk k-1.
+// Trick: add every chunk TWICE in parallel, once assuming carry-in = 0 and once
+// carry-in = 1. Then chain the carries chunk by chunk (only as many steps as there
+// are chunks) and keep the matching result of each chunk.
+fn par_add_binary(a: &str, b: &str) -> String {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
     let max_len = a.len().max(b.len());
+    let threads = rayon::current_num_threads();
+    let chunk_size = ((max_len + threads - 1) / threads).max(1);
+    let digit = |s: &[u8], i: usize| if i < s.len() { s[s.len() - 1 - i] - b'0' } else { 0 };
 
-    let chunk_size = (max_len as f64 / rayon::current_num_threads() as f64).ceil() as usize;
+    let starts: Vec<usize> = (0..max_len).step_by(chunk_size).collect();
 
-    let result_chunks: Vec<String> = (0..max_len)
-        .into_par_iter()
-        .chunks(chunk_size)
-        .map(|chunk| {
-            let a_clone = a.clone(); 
-            let b_clone = b.clone(); 
-            let indices = chunk.clone();
-
-            let mut carry=0;
-
-            let chunk_result: String = chunk.into_iter().zip(indices).map(|(_, i)| {
-                let digit_a = a_clone.chars().nth(i).unwrap_or('0').to_digit(2).unwrap_or(0);
-                let digit_b = b_clone.chars().nth(i).unwrap_or('0').to_digit(2).unwrap_or(0);
-                // println!("\nI[{}]: carry: {}, a: {}, b: {}",i,carry,digit_a,digit_b);                
-                let sum = digit_a + digit_b + carry;
-                if sum == 3 {
-                    let result = 1;
-                    carry = 1;                    
-                    // println!("carry[{}]: {}",i,carry);
-                    // println!("result[{}]: {}",i ,result);
-                    result.to_string()
-                } else if sum == 2 {
-                    let result = 0;
-                    carry = 1;
-                    // println!("carry[{}]: {}",i,carry);
-                    // println!("result[{}]: {}",i ,result);
-                    result.to_string()                          
-                } else if sum == 1 {
-                    let result = 1;
-                    carry = 0;
-                    // println!("carry[{}]: {}",i,carry);
-                    // println!("result[{}]: {}",i ,result);
-                    result.to_string()                          
-                } else if sum == 0 {
-                    let result = 0;
-                    carry = 0;
-                    // println!("carry[{}]: {}",i,carry);
-                    // println!("result[{}]: {}",i ,result);
-                    result.to_string()                          
-                
-                } else {
-                    let result = sum % 2;
+    // For each chunk: (digits for carry-in 0, carry-out, digits for carry-in 1, carry-out),
+    // digits least significant first.
+    let chunks: Vec<(Vec<u8>, u8, Vec<u8>, u8)> = starts
+        .par_iter()
+        .map(|&start| {
+            let end = (start + chunk_size).min(max_len);
+            let add_chunk = |mut carry: u8| {
+                let mut digits = Vec::with_capacity(end - start);
+                for i in start..end {
+                    let sum = digit(a, i) + digit(b, i) + carry;
+                    digits.push(b'0' + sum % 2);
                     carry = sum / 2;
-                    // println!("carry[{}]: {}",i,carry);
-                    // println!("result[{}]: {}",i ,result);
-                    result.to_string()                 
                 }
-
-            }).collect();
-
-            let mut chunk_result = chunk_result.chars().collect::<String>();
-            
-            if carry > 0 {
-                // println!("carry:{}",carry);
-                chunk_result.insert(0, '1');
-            }
-
-            chunk_result
+                (digits, carry)
+            };
+            let (digits0, carry0) = add_chunk(0);
+            let (digits1, carry1) = add_chunk(1);
+            (digits0, carry0, digits1, carry1)
         })
         .collect();
 
-    let result = result_chunks.into_iter().rev().collect::<String>();
+    // Chain the carries (a handful of steps, not one per digit)
+    let mut result = Vec::with_capacity(max_len + 1);
+    let mut carry = 0u8;
+    for (digits0, carry0, digits1, carry1) in chunks {
+        if carry == 0 {
+            result.extend(digits0);
+            carry = carry0;
+        } else {
+            result.extend(digits1);
+            carry = carry1;
+        }
+    }
+    if carry == 1 {
+        result.push(b'1');
+    }
+    result.reverse();
+    remove_leading_zeros(String::from_utf8(result).unwrap())
+}
 
-    result
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn readme_example() {
+        assert_eq!(add_binary("111", "110"), "1101");
+        assert_eq!(par_add_binary("111", "110"), "1101");
+        assert_eq!(par_add_binary1("111", "110"), "1101");
+    }
+
+    #[test]
+    fn edge_cases() {
+        for (a, b, want) in [("0", "0", "0"), ("1", "0", "1"), ("1", "1", "10"), ("11", "01", "100"), ("1111", "1", "10000")] {
+            assert_eq!(add_binary(a, b), want, "{a}+{b}");
+            assert_eq!(par_add_binary(a, b), want, "{a}+{b}");
+        }
+    }
+
+    #[test]
+    fn carry_across_chunks() {
+        // 1111...1 + 1 carries through every chunk
+        let a = "1".repeat(1000);
+        let want = format!("1{}", "0".repeat(1000));
+        assert_eq!(add_binary(&a, "1"), want);
+        assert_eq!(par_add_binary(&a, "1"), want);
+    }
+
+    #[test]
+    fn random_inputs_match_u128() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..5000 {
+            let (la, lb) = (rng.gen_range(1..=100), rng.gen_range(1..=100));
+            let a = remove_leading_zeros(generate_random_binary(la));
+            let b = remove_leading_zeros(generate_random_binary(lb));
+            let want = format!("{:b}", u128::from_str_radix(&a, 2).unwrap() + u128::from_str_radix(&b, 2).unwrap());
+            assert_eq!(add_binary(&a, &b), want, "{a}+{b}");
+            assert_eq!(par_add_binary(&a, &b), want, "{a}+{b}");
+        }
+    }
+
+    #[test]
+    fn random_long_inputs_parallel_equals_sequential() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..300 {
+            let (la, lb) = (rng.gen_range(1..=5000), rng.gen_range(1..=5000));
+            let a = remove_leading_zeros(generate_random_binary(la));
+            let b = remove_leading_zeros(generate_random_binary(lb));
+            assert_eq!(par_add_binary(&a, &b), add_binary(&a, &b));
+        }
+    }
 }
